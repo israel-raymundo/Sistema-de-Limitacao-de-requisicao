@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Rate Limiter</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<nav>
+    <h1>Rate Limiter — Token Bucket</h1>
+</nav>
+
+<div class="container">
+
+    <!-- EXPLICAÇÃO -->
+    <div class="info-box">
+        <strong>Como funciona:</strong> Cada usuário tem um balde com <strong>5 tokens</strong>.
+        Cada requisição consome 1 token. O balde é reabastecido em <strong>1 token por segundo</strong>.
+        Se o balde estiver vazio, a requisição é bloqueada com erro <strong>429</strong>.
+    </div>
+
+    <!-- CONTROLES -->
+    <div class="controles">
+        <div class="campo">
+            <label>Usuário</label>
+            <select id="user_id">
+                <option value="usuario_1">Usuário 1</option>
+                <option value="usuario_2">Usuário 2</option>
+                <option value="usuario_3">Usuário 3</option>
+            </select>
+        </div>
+
+        <div class="botoes">
+            <button onclick="fazerRequisicao()" class="btn-verde">
+                📨 Fazer 1 Requisição
+            </button>
+            <button onclick="sobrecarregar()" class="btn-vermelho">
+                ⚡ Disparar 10 de uma vez
+            </button>
+            <button onclick="resetar()" class="btn-cinza">
+                🔄 Resetar
+            </button>
+        </div>
+    </div>
+
+    <!-- STATUS DOS USUÁRIOS -->
+    <div class="cards" id="status-cards">
+        <p class="aguardando">Faça uma requisição para ver o status.</p>
+    </div>
+
+    <!-- LOG DE RESPOSTAS -->
+    <div class="log-container">
+        <div class="log-header">
+            <h2>📋 Log de Requisições</h2>
+            <button onclick="limparLog()" class="btn-cinza pequeno">Limpar</button>
+        </div>
+        <div id="log"></div>
+    </div>
+
+</div>
+
+<script>
+    async function fazerRequisicao() {
+        const user_id = document.getElementById("user_id").value;
+
+        const response = await fetch("/requisicao", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id })
+        });
+
+        const data = await response.json();
+        adicionarLog(user_id, data, response.status);
+        atualizarStatus();
+    }
+
+    async function sobrecarregar() {
+        const user_id = document.getElementById("user_id").value;
+        // Dispara 10 requisições ao mesmo tempo
+        const promises = Array.from({ length: 10 }, () =>
+            fetch("/requisicao", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id })
+            }).then(r => r.json().then(d => ({ data: d, status: r.status })))
+        );
+        const results = await Promise.all(promises);
+        results.forEach(r => adicionarLog(user_id, r.data, r.status));
+        atualizarStatus();
+    }
+
+    async function atualizarStatus() {
+        const response = await fetch("/status");
+        const data = await response.json();
+        const container = document.getElementById("status-cards");
+        container.innerHTML = "";
+
+        Object.entries(data).forEach(([uid, info]) => {
+            const pct = (info.tokens / info.max) * 100;
+            const cor = pct > 60 ? "verde" : pct > 20 ? "amarelo" : "vermelho";
+            container.innerHTML += `
+                <div class="card">
+                    <h3>👤 ${uid}</h3>
+                    <p>${info.tokens} / ${info.max} tokens</p>
+                    <div class="barra-fundo">
+                        <div class="barra ${cor}" style="width: ${pct}%"></div>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    async function resetar() {
+        await fetch("/resetar");
+        document.getElementById("status-cards").innerHTML =
+            '<p class="aguardando">Faça uma requisição para ver o status.</p>';
+        document.getElementById("log").innerHTML = "";
+    }
+
+    function adicionarLog(user_id, data, status) {
+        const log = document.getElementById("log");
+        const cor = data.allowed ? "log-sucesso" : "log-erro";
+        const agora = new Date().toLocaleTimeString("pt-br");
+        log.innerHTML = `
+            <div class="log-item ${cor}">
+                <span class="log-hora">${agora}</span>
+                <span class="log-user">${user_id}</span>
+                <span class="log-status">HTTP ${status}</span>
+                <span class="log-msg">${data.message}</span>
+                <span class="log-tokens">🪣 ${data.tokens}/${data.max_tokens} tokens</span>
+            </div>
+        ` + log.innerHTML;
+    }
+
+    function limparLog() {
+        document.getElementById("log").innerHTML = "";
+    }
+</script>
+
+</body>
+</html>
